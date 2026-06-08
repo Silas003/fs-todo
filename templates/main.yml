@@ -1,0 +1,128 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Root stack for the Todo application. Deploys networking, ECR, ALB, RDS,
+  ElastiCache, ECS Fargate service, CI/CD pipeline, and GitHub OIDC in the
+  correct dependency order.
+
+Parameters:
+  TemplatesBucketUrl:
+    Type: String
+    Default: https://silas-templates.s3.eu-central-1.amazonaws.com
+    Description: S3 URL (no trailing slash) where CloudFormation templates are stored
+
+  GitHubOrg:
+    Type: String
+    Description: GitHub organization or username
+
+  InfraRepoName:
+    Type: String
+    Description: Infrastructure repository name
+
+  AppRepoName:
+    Type: String
+    Description: Application repository name
+
+Resources:
+
+  NetworkingStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub '${TemplatesBucketUrl}/network.yml'
+
+  ECRStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub '${TemplatesBucketUrl}/ecr.yml'
+
+  ALBStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - NetworkingStack
+    Properties:
+      TemplateURL: !Sub '${TemplatesBucketUrl}/application.yml'
+      Parameters:
+        SubnetGroup1: !GetAtt NetworkingStack.Outputs.PublicSubnet1Id
+        SubnetGroup2: !GetAtt NetworkingStack.Outputs.PublicSubnet2Id
+        VpcId: !GetAtt NetworkingStack.Outputs.VPCId
+        ALBSecurityGroupId: !GetAtt NetworkingStack.Outputs.ALBSecurityGroupId
+
+  RDSStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - NetworkingStack
+    Properties:
+      TemplateURL: !Sub '${TemplatesBucketUrl}/rds.yml'
+      Parameters:
+        VpcId: !GetAtt NetworkingStack.Outputs.VPCId
+        PrivateRDSSubnet1Id: !GetAtt NetworkingStack.Outputs.PrivateRDSSubnet1Id
+        PrivateRDSSubnet2Id: !GetAtt NetworkingStack.Outputs.PrivateRDSSubnet2Id
+        RDSProxySecurityGroupId: !GetAtt NetworkingStack.Outputs.RDSProxySecurityGroupId
+        RDSSecurityGroupId: !GetAtt NetworkingStack.Outputs.RDSSecurityGroupId
+
+  CacheStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - NetworkingStack
+    Properties:
+      TemplateURL: !Sub '${TemplatesBucketUrl}/cache.yml'
+      Parameters:
+        PrivateCacheSubnet1Id: !GetAtt NetworkingStack.Outputs.PrivateCacheSubnet1Id
+        PrivateCacheSubnet2Id: !GetAtt NetworkingStack.Outputs.PrivateCacheSubnet2Id
+        ElastiCacheSecurityGroupId: !GetAtt NetworkingStack.Outputs.ElastiCacheSecurityGroupId
+
+
+  ContainersStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ALBStack
+      - RDSStack
+      - CacheStack
+      - ECRStack
+    Properties:
+      TemplateURL: !Sub '${TemplatesBucketUrl}/container.yml'
+      Parameters:
+        Image: !Sub '${ECRStack.Outputs.RepositoryUri}:latest'
+        ECSPrivateSubnet1: !GetAtt NetworkingStack.Outputs.PrivateECSSubnet1Id
+        ECSPrivateSubnet2: !GetAtt NetworkingStack.Outputs.PrivateECSSubnet2Id
+        VpcId: !GetAtt NetworkingStack.Outputs.VPCId
+        ECSSecurityGroupId: !GetAtt NetworkingStack.Outputs.ECSSecurityGroupId
+        TargetGroupArn: !GetAtt ALBStack.Outputs.ALBTargetGroupArn
+        DBSecretArn: !GetAtt RDSStack.Outputs.DBSecretArn
+        DBProxyEndpoint: !GetAtt RDSStack.Outputs.RDSProxyEndpoint
+        RedisHost: !GetAtt CacheStack.Outputs.RedisEndpoint
+
+
+
+  PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ContainersStack
+      - ALBStack
+      - ECRStack
+    Properties:
+      TemplateURL: !Sub '${TemplatesBucketUrl}/pipeline.yml'
+      Parameters:
+        ECSClusterName: !GetAtt ContainersStack.Outputs.ECSClusterName
+        ECSServiceName: !GetAtt ContainersStack.Outputs.ECSServiceName
+        ALBListenerArn: !GetAtt ALBStack.Outputs.ALBListenerArn
+        TestListenerArn: !GetAtt ALBStack.Outputs.TestListenerArn
+        BlueTargetGroupName: !GetAtt ALBStack.Outputs.BlueTargetGroupName
+        GreenTargetGroupName: !GetAtt ALBStack.Outputs.GreenTargetGroupName
+        ECRRepositoryName: !GetAtt ECRStack.Outputs.RepositoryName
+
+Outputs:
+  ALBDnsName:
+    Value: !GetAtt ALBStack.Outputs.ALBDnsName
+    Description: Public ALB endpoint — access the application here
+
+  ECRRepositoryUri:
+    Value: !GetAtt ECRStack.Outputs.RepositoryUri
+    Description: ECR image URI
+
+  RDSProxyEndpoint:
+    Value: !GetAtt RDSStack.Outputs.RDSProxyEndpoint
+    Description: RDS Proxy endpoint
+
+  RedisEndpoint:
+    Value: !GetAtt CacheStack.Outputs.RedisEndpoint
+    Description: Redis cluster endpoint
