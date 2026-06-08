@@ -1,0 +1,99 @@
+name: Sync CloudFormation Templates to S3
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'templates/network.yml'
+      - 'templates/application.yml'
+      - 'templates/container.yml'
+      - 'templates/ecr.yml'
+      - 'templates/rds.yml'
+      - 'templates/cache.yml'
+      - 'templates/pipeline.yml'
+      - 'templates/main.yml'
+      - 'templates/codedeploy/appspec.yaml'
+      - 'templates/codedeploy/taskdef.json'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  sync-templates:
+    name: Upload changed templates to S3
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.APP_ROLE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Detect changed templates
+        id: changed
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD -- \
+            templates/network.yml \
+            templates/application.yml \
+            templates/container.yml \
+            templates/ecr.yml \
+            templates/rds.yml \
+            templates/cache.yml \
+            templates/pipeline.yml \
+            templates/main.yml)
+          echo "files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "Changed templates: $CHANGED"
+
+      - name: Upload changed templates to S3
+        if: steps.changed.outputs.files != ''
+        run: |
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            filename=$(basename "$file")
+            echo "Uploading $file -> s3://${{ secrets.TEMPLATES_BUCKET }}/$filename"
+            aws s3 cp "$file" "s3://${{ secrets.TEMPLATES_BUCKET }}/$filename"
+          done <<< "${{ steps.changed.outputs.files }}"
+
+  sync-codedeploy:
+    name: Zip and upload CodeDeploy artifacts to S3
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check for changes in codedeploy files
+        id: changed
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD -- \
+            templates/codedeploy/appspec.yaml \
+            templates/codedeploy/taskdef.json)
+          echo "files=$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "Changed codedeploy files: $CHANGED"
+
+      - name: Configure AWS credentials (OIDC)
+        if: steps.changed.outputs.files != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.APP_ROLE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Build and upload deploy.zip
+        if: steps.changed.outputs.files != ''
+        working-directory: templates/codedeploy
+        run: |
+          zip deploy.zip appspec.yaml taskdef.json
+          echo "Uploading deploy.zip -> s3://${{ secrets.APPSPEC_BUCKET }}/deploy.zip"
+          aws s3 cp deploy.zip "s3://${{ secrets.APPSPEC_BUCKET }}/deploy.zip"
