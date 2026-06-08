@@ -79,7 +79,7 @@ Parameters:
 
   CPUScalingTarget:
     Type: Number
-    Default: 50
+    Default: 60
 
   ScaleInCooldown:
     Type: Number
