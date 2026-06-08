@@ -79,7 +79,7 @@ Parameters:
 
   CPUScalingTarget:
     Type: Number
-    Default: 50
+    Default: 60
 
   ScaleInCooldown:
     Type: Number
@@ -87,7 +87,7 @@ Parameters:
 
   ScaleOutCooldown:
     Type: Number
-    Default: 70
+    Default: 80
 
   DBName:
     Type: String
@@ -306,3 +306,4 @@ Outputs:
   TaskRoleArn:
     Value: !GetAtt ECSTaskRole.Arn
     Description: Task role ARN
+
