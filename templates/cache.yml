@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ElastiCache Redis cluster for read caching
+
+Parameters:
+  PrivateCacheSubnet1Id:
+    Type: String
+
+  PrivateCacheSubnet2Id:
+    Type: String
+
+  ElastiCacheSecurityGroupId:
+    Type: String
+
+  CacheNodeType:
+    Type: String
+    Default: cache.t3.micro
+    AllowedValues:
+      - cache.t3.micro
+      - cache.t3.small
+      - cache.t3.medium
+
+  EngineVersion:
+    Type: String
+    Default: '7.1'
+
+  NumCacheNodes:
+    Type: Number
+    Default: 1
+
+Resources:
+
+  CacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      CacheSubnetGroupName: todo-cache-subnet-group
+      Description: Subnet group for todo ElastiCache cluster
+      SubnetIds:
+        - !Ref PrivateCacheSubnet1Id
+        - !Ref PrivateCacheSubnet2Id
+
+  CacheParameterGroup:
+    Type: AWS::ElastiCache::ParameterGroup
+    Properties:
+      CacheParameterGroupFamily: redis7
+      Description: Todo app Redis parameter group
+      Properties:
+        maxmemory-policy: allkeys-lru
+
+  RedisCluster:
+    Type: AWS::ElastiCache::CacheCluster
+    Properties:
+      ClusterName: todo-redis
+      Engine: redis
+      EngineVersion: !Ref EngineVersion
+      CacheNodeType: !Ref CacheNodeType
+      NumCacheNodes: !Ref NumCacheNodes
+      CacheSubnetGroupName: !Ref CacheSubnetGroup
+      CacheParameterGroupName: !Ref CacheParameterGroup
+      VpcSecurityGroupIds:
+        - !Ref ElastiCacheSecurityGroupId
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - Key: Name
+          Value: todo-redis
+        - Key: Project
+          Value: todo
+
+  RedisEndpointParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /todo/redis/endpoint
+      Type: String
+      Value: !GetAtt RedisCluster.RedisEndpoint.Address
+      Description: ElastiCache Redis endpoint used by ECS tasks
+      Tags:
+        Project: todo
+
+  RedisPortParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /todo/redis/port
+      Type: String
+      Value: !GetAtt RedisCluster.RedisEndpoint.Port
+      Description: ElastiCache Redis port
+      Tags:
+        Project: todo
+
+Outputs:
+  RedisEndpoint:
+    Value: !GetAtt RedisCluster.RedisEndpoint.Address
+    Description: Redis cluster endpoint
+
+  RedisPort:
+    Value: !GetAtt RedisCluster.RedisEndpoint.Port
+    Description: Redis cluster port
+
+  CacheClusterName:
+    Value: !Ref RedisCluster
+    Description: ElastiCache cluster name
