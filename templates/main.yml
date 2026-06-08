@@ -7,20 +7,9 @@ Description: >
 Parameters:
   TemplatesBucketUrl:
     Type: String
-    Default: https://silas-templates.s3.eu-central-1.amazonaws.com
+    Default: https://todo-templates.s3.eu-central-1.amazonaws.com
     Description: S3 URL (no trailing slash) where CloudFormation templates are stored
 
-  GitHubOrg:
-    Type: String
-    Description: GitHub organization or username
-
-  InfraRepoName:
-    Type: String
-    Description: Infrastructure repository name
-
-  AppRepoName:
-    Type: String
-    Description: Application repository name
 
 Resources:
 
