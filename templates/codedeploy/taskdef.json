@@ -1,0 +1,62 @@
+{
+  "family": "todo-service",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::266735814394:role/todo-task-execution-role",
+  "taskRoleArn": "arn:aws:iam::266735814394:role/todo-task-role",
+  "containerDefinitions": [
+    {
+      "name": "todo",
+      "image": "<IMAGE1_NAME>",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "hostPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "DB_PORT",               "value": "5432" },
+        { "name": "DB_NAME",               "value": "todo" },
+        { "name": "REDIS_PORT",            "value": "6379" },
+        { "name": "SPRING_PROFILES_ACTIVE","value": "prod" }
+      ],
+      "secrets": [
+        {
+          "name": "DB_HOST",
+          "valueFrom": "arn:aws:ssm:eu-central-1:266735814394:parameter/todo/db/proxy-endpoint"
+        },
+        {
+          "name": "REDIS_HOST",
+          "valueFrom": "arn:aws:ssm:eu-central-1:266735814394:parameter/todo/redis/endpoint"
+        },
+        {
+          "name": "DB_USERNAME",
+          "valueFrom": "arn:aws:secretsmanager:eu-central-1:266735814394:secret:todo/db/credentials:username::"
+        },
+        {
+          "name": "DB_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:eu-central-1:266735814394:secret:todo/db/credentials:password::"
+        }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/todo",
+          "awslogs-region": "eu-central-1",
+          "awslogs-stream-prefix": "todo"
+        }
+      }
+    }
+  ]
+}

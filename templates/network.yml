@@ -164,26 +164,6 @@ Resources:
       VpcId: !Ref CustomVPC
       InternetGatewayId: !Ref InternetGateway
 
-  # ── NAT Gateway (single, AZ-a for cost; use two for full HA in production) ─
-
-  NATGatewayEIP:
-    Type: AWS::EC2::EIP
-    DependsOn: InternetGatewayAttachment
-    Properties:
-      Domain: vpc
-      Tags:
-        - Key: Name
-          Value: todo-nat-eip
-
-  NATGateway:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId: !GetAtt NATGatewayEIP.AllocationId
-      SubnetId: !Ref PublicSubnet1
-      Tags:
-        - Key: Name
-          Value: todo-nat
-
   # ── Route tables ───────────────────────────────────────────────────────────
 
   PublicRouteTable:
@@ -214,7 +194,7 @@ Resources:
       RouteTableId: !Ref PublicRouteTable
       SubnetId: !Ref PublicSubnet2
 
-  # ECS private route table: egress via NAT Gateway
+  # ECS private route table: all AWS traffic via VPC endpoints, no internet egress
   PrivateECSRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -222,13 +202,6 @@ Resources:
       Tags:
         - Key: Name
           Value: todo-ecs-private-rt
-
-  PrivateECSNatRoute:
-    Type: AWS::EC2::Route
-    Properties:
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NATGateway
-      RouteTableId: !Ref PrivateECSRouteTable
 
   PrivateECSSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
