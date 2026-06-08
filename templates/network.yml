@@ -1,0 +1,543 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Multi-AZ VPC with public/private subnets for ALB, ECS, RDS, and ElastiCache
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+
+  AZ1:
+    Type: String
+    Default: eu-central-1a
+
+  AZ2:
+    Type: String
+    Default: eu-central-1b
+
+  PublicSubnet1Cidr:
+    Type: String
+    Default: 10.0.0.0/24
+
+  PublicSubnet2Cidr:
+    Type: String
+    Default: 10.0.1.0/24
+
+  PrivateECSSubnet1Cidr:
+    Type: String
+    Default: 10.0.10.0/24
+
+  PrivateECSSubnet2Cidr:
+    Type: String
+    Default: 10.0.11.0/24
+
+  PrivateRDSSubnet1Cidr:
+    Type: String
+    Default: 10.0.20.0/24
+
+  PrivateRDSSubnet2Cidr:
+    Type: String
+    Default: 10.0.21.0/24
+
+  PrivateCacheSubnet1Cidr:
+    Type: String
+    Default: 10.0.30.0/24
+
+  PrivateCacheSubnet2Cidr:
+    Type: String
+    Default: 10.0.31.0/24
+
+Resources:
+  CustomVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: todo-vpc
+        - Key: Project
+          Value: todo
+
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      AvailabilityZone: !Ref AZ1
+      CidrBlock: !Ref PublicSubnet1Cidr
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Name
+          Value: todo-public-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      AvailabilityZone: !Ref AZ2
+      CidrBlock: !Ref PublicSubnet2Cidr
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Name
+          Value: todo-public-2
+
+  # ── Private subnets – ECS ──────────────────────────────────────────────────
+
+  PrivateECSSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Ref AZ1
+      CidrBlock: !Ref PrivateECSSubnet1Cidr
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Name
+          Value: todo-ecs-private-1
+
+  PrivateECSSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Ref AZ2
+      CidrBlock: !Ref PrivateECSSubnet2Cidr
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Name
+          Value: todo-ecs-private-2
+
+  # ── Private subnets – RDS ──────────────────────────────────────────────────
+
+  PrivateRDSSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Ref AZ1
+      CidrBlock: !Ref PrivateRDSSubnet1Cidr
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Name
+          Value: todo-rds-private-1
+
+  PrivateRDSSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Ref AZ2
+      CidrBlock: !Ref PrivateRDSSubnet2Cidr
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Name
+          Value: todo-rds-private-2
+
+  # ── Private subnets – ElastiCache ─────────────────────────────────────────
+
+  PrivateCacheSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Ref AZ1
+      CidrBlock: !Ref PrivateCacheSubnet1Cidr
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Name
+          Value: todo-cache-private-1
+
+  PrivateCacheSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Ref AZ2
+      CidrBlock: !Ref PrivateCacheSubnet2Cidr
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Name
+          Value: todo-cache-private-2
+
+  # ── Internet Gateway ───────────────────────────────────────────────────────
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: todo-igw
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref CustomVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # ── NAT Gateway (single, AZ-a for cost; use two for full HA in production) ─
+
+  NATGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: todo-nat-eip
+
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: todo-nat
+
+  # ── Route tables ───────────────────────────────────────────────────────────
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Name
+          Value: todo-public-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  # ECS private route table: egress via NAT Gateway
+  PrivateECSRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Name
+          Value: todo-ecs-private-rt
+
+  PrivateECSNatRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+      RouteTableId: !Ref PrivateECSRouteTable
+
+  PrivateECSSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateECSRouteTable
+      SubnetId: !Ref PrivateECSSubnet1
+
+  PrivateECSSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateECSRouteTable
+      SubnetId: !Ref PrivateECSSubnet2
+
+  # RDS private route table: VPC-local only
+  PrivateRDSRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Name
+          Value: todo-rds-private-rt
+
+  PrivateRDSSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRDSRouteTable
+      SubnetId: !Ref PrivateRDSSubnet1
+
+  PrivateRDSSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRDSRouteTable
+      SubnetId: !Ref PrivateRDSSubnet2
+
+  # Cache private route table: VPC-local only
+  PrivateCacheRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Name
+          Value: todo-cache-private-rt
+
+  PrivateCacheSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateCacheRouteTable
+      SubnetId: !Ref PrivateCacheSubnet1
+
+  PrivateCacheSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateCacheRouteTable
+      SubnetId: !Ref PrivateCacheSubnet2
+
+  # ── Security Groups ────────────────────────────────────────────────────────
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Public ALB - accepts HTTP traffic from internet
+      GroupName: todo-alb-sg
+      VpcId: !Ref CustomVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Production HTTP
+        - IpProtocol: tcp
+          FromPort: 8081
+          ToPort: 8081
+          CidrIp: 0.0.0.0/0
+          Description: CodeDeploy test listener
+      Tags:
+        - Key: Name
+          Value: todo-alb-sg
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS Fargate tasks - inbound from ALB only
+      GroupName: todo-ecs-sg
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Name
+          Value: todo-ecs-sg
+
+  ECSIngressFromALB:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ECSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      SourceSecurityGroupId: !Ref ALBSecurityGroup
+      Description: App traffic from ALB
+
+  RDSProxySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS Proxy - accepts PostgreSQL from ECS tasks
+      GroupName: todo-rds-proxy-sg
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Name
+          Value: todo-rds-proxy-sg
+
+  RDSProxyIngressFromECS:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RDSProxySecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref ECSSecurityGroup
+      Description: PostgreSQL from ECS tasks
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS instance - accepts PostgreSQL from RDS Proxy only
+      GroupName: todo-rds-sg
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Name
+          Value: todo-rds-sg
+
+  RDSIngressFromProxy:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RDSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref RDSProxySecurityGroup
+      Description: PostgreSQL from RDS Proxy
+
+  ElastiCacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ElastiCache Redis - accepts connections from ECS tasks
+      GroupName: todo-cache-sg
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Name
+          Value: todo-cache-sg
+
+  CacheIngressFromECS:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ElastiCacheSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      SourceSecurityGroupId: !Ref ECSSecurityGroup
+      Description: Redis from ECS tasks
+
+  VpcEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Interface VPC endpoints - HTTPS from VPC
+      GroupName: todo-vpce-sg
+      VpcId: !Ref CustomVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidr
+          Description: HTTPS from VPC
+      Tags:
+        - Key: Name
+          Value: todo-vpce-sg
+
+  # ── VPC Endpoints ──────────────────────────────────────────────────────────
+
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Gateway
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId: !Ref CustomVPC
+      RouteTableIds:
+        - !Ref PrivateECSRouteTable
+        - !Ref PrivateRDSRouteTable
+        - !Ref PrivateCacheRouteTable
+
+  ECRApiEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.api'
+      VpcId: !Ref CustomVPC
+      SubnetIds:
+        - !Ref PrivateECSSubnet1
+        - !Ref PrivateECSSubnet2
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+      PrivateDnsEnabled: true
+
+  ECRDkrEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.dkr'
+      VpcId: !Ref CustomVPC
+      SubnetIds:
+        - !Ref PrivateECSSubnet1
+        - !Ref PrivateECSSubnet2
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+      PrivateDnsEnabled: true
+
+  CloudWatchLogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.logs'
+      VpcId: !Ref CustomVPC
+      SubnetIds:
+        - !Ref PrivateECSSubnet1
+        - !Ref PrivateECSSubnet2
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+      PrivateDnsEnabled: true
+
+  SecretsManagerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.secretsmanager'
+      VpcId: !Ref CustomVPC
+      SubnetIds:
+        - !Ref PrivateECSSubnet1
+        - !Ref PrivateECSSubnet2
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+      PrivateDnsEnabled: true
+
+  SSMEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssm'
+      VpcId: !Ref CustomVPC
+      SubnetIds:
+        - !Ref PrivateECSSubnet1
+        - !Ref PrivateECSSubnet2
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+      PrivateDnsEnabled: true
+
+Outputs:
+  VPCId:
+    Value: !Ref CustomVPC
+    Description: VPC ID
+
+  VpcCidr:
+    Value: !Ref VpcCidr
+    Description: VPC CIDR block
+
+  PublicSubnet1Id:
+    Value: !Ref PublicSubnet1
+    Description: Public Subnet 1 (AZ-a)
+
+  PublicSubnet2Id:
+    Value: !Ref PublicSubnet2
+    Description: Public Subnet 2 (AZ-b)
+
+  PrivateECSSubnet1Id:
+    Value: !Ref PrivateECSSubnet1
+    Description: ECS Private Subnet 1 (AZ-a)
+
+  PrivateECSSubnet2Id:
+    Value: !Ref PrivateECSSubnet2
+    Description: ECS Private Subnet 2 (AZ-b)
+
+  PrivateRDSSubnet1Id:
+    Value: !Ref PrivateRDSSubnet1
+    Description: RDS Private Subnet 1 (AZ-a)
+
+  PrivateRDSSubnet2Id:
+    Value: !Ref PrivateRDSSubnet2
+    Description: RDS Private Subnet 2 (AZ-b)
+
+  PrivateCacheSubnet1Id:
+    Value: !Ref PrivateCacheSubnet1
+    Description: Cache Private Subnet 1 (AZ-a)
+
+  PrivateCacheSubnet2Id:
+    Value: !Ref PrivateCacheSubnet2
+    Description: Cache Private Subnet 2 (AZ-b)
+
+  ALBSecurityGroupId:
+    Value: !Ref ALBSecurityGroup
+    Description: ALB Security Group ID
+
+  ECSSecurityGroupId:
+    Value: !Ref ECSSecurityGroup
+    Description: ECS Tasks Security Group ID
+
+  RDSProxySecurityGroupId:
+    Value: !Ref RDSProxySecurityGroup
+    Description: RDS Proxy Security Group ID
+
+  RDSSecurityGroupId:
+    Value: !Ref RDSSecurityGroup
+    Description: RDS Instance Security Group ID
+
+  ElastiCacheSecurityGroupId:
+    Value: !Ref ElastiCacheSecurityGroup
+    Description: ElastiCache Security Group ID

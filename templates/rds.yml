@@ -1,0 +1,207 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: RDS PostgreSQL instance, RDS Proxy, and Secrets Manager credential secret
+
+Parameters:
+  VpcId:
+    Type: String
+
+  PrivateRDSSubnet1Id:
+    Type: String
+
+  PrivateRDSSubnet2Id:
+    Type: String
+
+  RDSProxySecurityGroupId:
+    Type: String
+
+  RDSSecurityGroupId:
+    Type: String
+
+  DBName:
+    Type: String
+    Default: todo
+
+  DBUsername:
+    Type: String
+    Default: todo_admin
+
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t3.medium
+
+  DBAllocatedStorage:
+    Type: Number
+    Default: 20
+
+  DBEngineVersion:
+    Type: String
+    Default: '15'
+
+  MultiAZ:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+Resources:
+
+  # ── Secrets Manager ────────────────────────────────────────────────────────
+
+  DBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: todo/db/credentials
+      Description: RDS PostgreSQL credentials for the todo application
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${DBUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 24
+        ExcludeCharacters: '"@/\'
+      Tags:
+        - Key: Project
+          Value: todo
+
+  # Stores the RDS Proxy endpoint for reference by ECS tasks via SSM
+  DBProxyEndpointParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /todo/db/proxy-endpoint
+      Type: String
+      Value: !GetAtt RDSProxy.Endpoint
+      Description: RDS Proxy endpoint used by ECS tasks
+      Tags:
+        Project: todo
+
+  # ── DB Subnet Group ────────────────────────────────────────────────────────
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for todo RDS instance
+      SubnetIds:
+        - !Ref PrivateRDSSubnet1Id
+        - !Ref PrivateRDSSubnet2Id
+      Tags:
+        - Key: Name
+          Value: todo-db-subnet-group
+        - Key: Project
+          Value: todo
+
+  # ── RDS PostgreSQL Instance ────────────────────────────────────────────────
+
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: todo-db
+      DBName: !Ref DBName
+      DBInstanceClass: !Ref DBInstanceClass
+      Engine: postgres
+      EngineVersion: !Ref DBEngineVersion
+      MasterUsername: !Sub '{{resolve:secretsmanager:${DBSecret}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBSecret}:SecretString:password}}'
+      AllocatedStorage: !Ref DBAllocatedStorage
+      StorageType: gp2
+      StorageEncrypted: true
+      MultiAZ: !Ref MultiAZ
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroupId
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: 03:00-04:00
+      PreferredMaintenanceWindow: sun:04:00-sun:05:00
+      EnablePerformanceInsights: false
+      PubliclyAccessible: false
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - Key: Name
+          Value: todo-db
+        - Key: Project
+          Value: todo
+
+  # ── IAM Role for RDS Proxy ─────────────────────────────────────────────────
+
+  RDSProxyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: todo-rds-proxy-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RDSProxySecretsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource: !Ref DBSecret
+
+  # ── RDS Proxy ──────────────────────────────────────────────────────────────
+
+  RDSProxy:
+    Type: AWS::RDS::DBProxy
+    Properties:
+      DBProxyName: todo-db-proxy
+      EngineFamily: POSTGRESQL
+      RoleArn: !GetAtt RDSProxyRole.Arn
+      Auth:
+        - AuthScheme: SECRETS
+          SecretArn: !Ref DBSecret
+          IAMAuth: DISABLED
+      VpcSubnetIds:
+        - !Ref PrivateRDSSubnet1Id
+        - !Ref PrivateRDSSubnet2Id
+      VpcSecurityGroupIds:
+        - !Ref RDSProxySecurityGroupId
+      RequireTLS: true
+      IdleClientTimeout: 1800
+      Tags:
+        - Key: Name
+          Value: todo-db-proxy
+        - Key: Project
+          Value: todo
+
+  RDSProxyTargetGroup:
+    Type: AWS::RDS::DBProxyTargetGroup
+    Properties:
+      DBProxyName: !Ref RDSProxy
+      TargetGroupName: default
+      DBInstanceIdentifiers:
+        - !Ref DBInstance
+      ConnectionPoolConfigurationInfo:
+        MaxConnectionsPercent: 80
+        MaxIdleConnectionsPercent: 50
+        ConnectionBorrowTimeout: 120
+
+Outputs:
+  DBSecretArn:
+    Value: !Ref DBSecret
+    Description: ARN of the Secrets Manager secret containing DB credentials
+
+  DBSecretName:
+    Value: todo/db/credentials
+    Description: Name of the DB credentials secret
+
+  RDSProxyEndpoint:
+    Value: !GetAtt RDSProxy.Endpoint
+    Description: RDS Proxy endpoint for application connections
+
+  DBInstanceEndpoint:
+    Value: !GetAtt DBInstance.Endpoint.Address
+    Description: Direct RDS instance endpoint (use Proxy for app connections)
+
+  DBName:
+    Value: !Ref DBName
+    Description: Database name
