@@ -1,0 +1,2 @@
+template-file-path: templates/main.yml
+stack-name: todo-main

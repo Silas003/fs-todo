@@ -1,0 +1,308 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ECS Fargate cluster, task definition, service, and auto scaling
+
+Parameters:
+  Image:
+    Type: String
+    Default: 266735814394.dkr.ecr.eu-central-1.amazonaws.com/todo:latest
+
+  TaskCPU:
+    Type: Number
+    Default: 256
+    AllowedValues:
+      - 256
+      - 512
+      - 1024
+
+  TaskMemory:
+    Type: Number
+    Default: 512
+    AllowedValues:
+      - 512
+      - 1024
+      - 2048
+
+  ECSPrivateSubnet1:
+    Type: String
+    Description: ECS private subnet 1 ID
+
+  ECSPrivateSubnet2:
+    Type: String
+    Description: ECS private subnet 2 ID
+
+  VpcId:
+    Type: String
+
+  ECSSecurityGroupId:
+    Type: String
+    Description: Security group for ECS tasks (from network stack)
+
+  TargetGroupArn:
+    Type: String
+    Description: ALB blue target group ARN
+
+  ContainerName:
+    Type: String
+    Default: todo
+
+  ContainerPort:
+    Type: Number
+    Default: 8080
+
+  LogGroupName:
+    Type: String
+    Default: /ecs/todo
+
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+
+  ClusterName:
+    Type: String
+    Default: TodoCluster
+
+  ServiceName:
+    Type: String
+    Default: todo-service
+
+  DesiredCount:
+    Type: Number
+    Default: 0
+
+  AutoScalingMinCapacity:
+    Type: Number
+    Default: 1
+
+  AutoScalingMaxCapacity:
+    Type: Number
+    Default: 4
+
+  CPUScalingTarget:
+    Type: Number
+    Default: 50
+
+  ScaleInCooldown:
+    Type: Number
+    Default: 310
+
+  ScaleOutCooldown:
+    Type: Number
+    Default: 70
+
+  DBName:
+    Type: String
+    Default: todo
+
+  DBSecretArn:
+    Type: String
+    Description: Secrets Manager ARN for DB credentials
+
+  DBProxyEndpoint:
+    Type: String
+    Description: RDS Proxy endpoint
+
+  RedisHost:
+    Type: String
+    Description: ElastiCache Redis endpoint
+
+  RedisPort:
+    Type: Number
+    Default: 6379
+
+Resources:
+  TodoLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref LogGroupName
+      RetentionInDays: !Ref LogRetentionDays
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: todo-task-execution-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsAndSSMAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource: !Ref DBSecretArn
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/todo/*'
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: todo-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ECSTaskPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LogGroupName}*'
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref ServiceName
+      Cpu: !Ref TaskCPU
+      Memory: !Ref TaskMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Ref ServiceName
+        - Key: Project
+          Value: todo
+      ContainerDefinitions:
+        - Name: !Ref ContainerName
+          Image: !Ref Image
+          Essential: true
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              HostPort: !Ref ContainerPort
+              Protocol: tcp
+          Environment:
+            - Name: DB_PORT
+              Value: '5432'
+            - Name: DB_NAME
+              Value: !Ref DBName
+            - Name: DB_HOST
+              Value: !Ref DBProxyEndpoint
+            - Name: REDIS_HOST
+              Value: !Ref RedisHost
+            - Name: REDIS_PORT
+              Value: !Sub '${RedisPort}'
+          Secrets:
+            - Name: DB_USERNAME
+              ValueFrom: !Sub '${DBSecretArn}:username::'
+            - Name: DB_PASSWORD
+              ValueFrom: !Sub '${DBSecretArn}:password::'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref TodoLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Ref ContainerName
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - 'wget -q -O /dev/null http://localhost:8080/health || exit 1'
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref ClusterName
+      CapacityProviders:
+        - FARGATE
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+      Configuration:
+        ExecuteCommandConfiguration:
+          Logging: DEFAULT
+      Tags:
+        - Key: Project
+          Value: todo
+
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Ref ServiceName
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCount
+      DeploymentController:
+        Type: CODE_DEPLOY
+      LaunchType: FARGATE
+      HealthCheckGracePeriodSeconds: 60
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref ECSSecurityGroupId
+          Subnets:
+            - !Ref ECSPrivateSubnet1
+            - !Ref ECSPrivateSubnet2
+      TaskDefinition: !Ref TaskDefinition
+      LoadBalancers:
+        - ContainerName: !Ref ContainerName
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: !Ref TargetGroupArn
+      Tags:
+        - Key: Project
+          Value: todo
+
+  ECSServiceAutoScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    DependsOn: ECSService
+    Properties:
+      MaxCapacity: !Ref AutoScalingMaxCapacity
+      MinCapacity: !Ref AutoScalingMinCapacity
+      ResourceId: !Sub 'service/${ECSCluster}/${ServiceName}'
+      RoleARN: !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService'
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  ECSServiceScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: todo-cpu-scaling-policy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ECSServiceAutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: !Ref CPUScalingTarget
+        ScaleInCooldown: !Ref ScaleInCooldown
+        ScaleOutCooldown: !Ref ScaleOutCooldown
+
+Outputs:
+  ECSClusterName:
+    Value: !Ref ECSCluster
+    Description: ECS Cluster name
+
+  ECSServiceName:
+    Value: !Ref ServiceName
+    Description: ECS Service name
+
+  TaskExecutionRoleArn:
+    Value: !GetAtt TaskExecutionRole.Arn
+    Description: Task execution role ARN
+
+  TaskRoleArn:
+    Value: !GetAtt ECSTaskRole.Arn
+    Description: Task role ARN
