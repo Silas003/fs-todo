@@ -67,7 +67,7 @@ Parameters:
 
   DesiredCount:
     Type: Number
-    Default: 0
+    Default: 1
 
   AutoScalingMinCapacity:
     Type: Number
@@ -83,7 +83,7 @@ Parameters:
 
   ScaleInCooldown:
     Type: Number
-    Default: 310
+    Default: 100
 
   ScaleOutCooldown:
     Type: Number
