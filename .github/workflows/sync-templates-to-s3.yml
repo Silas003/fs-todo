@@ -4,17 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'templates/network.yml'
-      - 'templates/application.yml'
-      - 'templates/container.yml'
-      - 'templates/ecr.yml'
-      - 'templates/rds.yml'
-      - 'templates/cache.yml'
-      - 'templates/pipeline.yml'
-      - 'templates/main.yml'
-      - 'templates/codedeploy/appspec.yaml'
-      - 'templates/codedeploy/taskdef.json'
 
 permissions:
   contents: read
@@ -22,8 +11,44 @@ permissions:
 
 jobs:
   sync-templates:
-    name: Upload changed templates to S3
+    name: Upload templates to S3
     runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.APP_ROLE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload templates to S3
+        run: |
+          for file in \
+            templates/network.yml \
+            templates/security-groups.yml \
+            templates/vpc-endpoints.yml \
+            templates/ecr.yml \
+            templates/rds.yml \
+            templates/cache.yml \
+            templates/application.yml \
+            templates/iam.yml \
+            templates/cluster.yml \
+            templates/scaling.yml \
+            templates/storage.yml \
+            templates/pipeline.yml \
+            templates/oidc.yml \
+            templates/main.yml; do
+            echo "Uploading $file -> s3://${{ secrets.TEMPLATES_BUCKET }}/$(basename $file)"
+            aws s3 cp "$file" "s3://${{ secrets.TEMPLATES_BUCKET }}/$(basename $file)"
+          done
+
+  deploy-stacks:
+    name: Deploy changed stacks
+    runs-on: ubuntu-latest
+    needs: sync-templates
 
     steps:
       - name: Checkout repository
@@ -37,32 +62,73 @@ jobs:
           role-to-assume: ${{ secrets.APP_ROLE }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Detect changed templates
+      - name: Detect which stacks changed
         id: changed
         run: |
-          CHANGED=$(git diff --name-only HEAD~1 HEAD -- \
-            templates/network.yml \
-            templates/application.yml \
-            templates/container.yml \
-            templates/ecr.yml \
-            templates/rds.yml \
-            templates/cache.yml \
-            templates/pipeline.yml \
-            templates/main.yml)
-          echo "files<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$CHANGED" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-          echo "Changed templates: $CHANGED"
+          if git rev-parse HEAD~1 >/dev/null 2>&1; then
+            CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          else
+            CHANGED=$(git ls-files)
+          fi
 
-      - name: Upload changed templates to S3
-        if: steps.changed.outputs.files != ''
-        run: |
+          DEPLOY_OIDC=false
+          DEPLOY_ECR=false
+          DEPLOY_MAIN=false
+
           while IFS= read -r file; do
-            [ -z "$file" ] && continue
-            filename=$(basename "$file")
-            echo "Uploading $file -> s3://${{ secrets.TEMPLATES_BUCKET }}/$filename"
-            aws s3 cp "$file" "s3://${{ secrets.TEMPLATES_BUCKET }}/$filename"
-          done <<< "${{ steps.changed.outputs.files }}"
+            case "$file" in
+              templates/oidc.yml)
+                DEPLOY_OIDC=true ;;
+              templates/ecr.yml)
+                DEPLOY_ECR=true ;;
+              templates/network.yml|\
+              templates/security-groups.yml|\
+              templates/vpc-endpoints.yml|\
+              templates/rds.yml|\
+              templates/cache.yml|\
+              templates/application.yml|\
+              templates/iam.yml|\
+              templates/cluster.yml|\
+              templates/scaling.yml|\
+              templates/storage.yml|\
+              templates/pipeline.yml|\
+              templates/main.yml)
+                DEPLOY_MAIN=true ;;
+            esac
+          done <<< "$CHANGED"
+
+          echo "oidc=$DEPLOY_OIDC"   >> "$GITHUB_OUTPUT"
+          echo "ecr=$DEPLOY_ECR"     >> "$GITHUB_OUTPUT"
+          echo "main=$DEPLOY_MAIN"   >> "$GITHUB_OUTPUT"
+
+      - name: Deploy OIDC stack
+        if: steps.changed.outputs.oidc == 'true'
+        run: |
+          aws cloudformation deploy \
+            --template-file templates/oidc.yml \
+            --stack-name todo-github-oidc \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+
+      - name: Deploy ECR stack
+        if: steps.changed.outputs.ecr == 'true'
+        run: |
+          aws cloudformation deploy \
+            --template-file templates/ecr.yml \
+            --stack-name todo-ecr \
+            --no-fail-on-empty-changeset
+
+      - name: Deploy main stack
+        if: steps.changed.outputs.main == 'true'
+        run: |
+          aws cloudformation deploy \
+            --template-file templates/main.yml \
+            --stack-name todo \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --parameter-overrides \
+              ECRRepositoryName=${{ secrets.ECR_REPOSITORY_NAME }} \
+              ECRRepositoryUri=${{ secrets.ECR_REPOSITORY_URI }} \
+            --no-fail-on-empty-changeset
 
   sync-codedeploy:
     name: Zip and upload CodeDeploy artifacts to S3
@@ -71,29 +137,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: Check for changes in codedeploy files
-        id: changed
-        run: |
-          CHANGED=$(git diff --name-only HEAD~1 HEAD -- \
-            templates/codedeploy/appspec.yaml \
-            templates/codedeploy/taskdef.json)
-          echo "files<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$CHANGED" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-          echo "Changed codedeploy files: $CHANGED"
 
       - name: Configure AWS credentials (OIDC)
-        if: steps.changed.outputs.files != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.APP_ROLE }}
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Build and upload deploy.zip
-        if: steps.changed.outputs.files != ''
         working-directory: templates/codedeploy
         run: |
           zip deploy.zip appspec.yaml taskdef.json

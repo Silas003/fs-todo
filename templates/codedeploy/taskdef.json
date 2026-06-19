@@ -2,6 +2,10 @@
   "family": "todo-service",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
   "cpu": "256",
   "memory": "512",
   "executionRoleArn": "arn:aws:iam::266735814394:role/todo-task-execution-role",

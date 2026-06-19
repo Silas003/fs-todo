@@ -1,4 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
+Description: CodeDeploy application and deployment group, CodePipeline, and EventBridge trigger
 
 Parameters:
   ECSClusterName:
@@ -6,8 +7,6 @@ Parameters:
   ECSServiceName:
     Type: String
   ALBListenerArn:
-    Type: String
-  TestListenerArn:
     Type: String
   BlueTargetGroupName:
     Type: String
@@ -26,28 +25,23 @@ Parameters:
     Type: Number
     Default: 5
 
+  ArtifactBucketName:
+    Type: String
+    Description: S3 bucket name for CodePipeline artifacts
+
+  ArtifactBucketArn:
+    Type: String
+    Description: ARN of the CodePipeline artifact bucket
+
+  AppSpecSourceBucketName:
+    Type: String
+    Description: S3 bucket name containing deploy.zip
+
+  AppSpecSourceBucketArn:
+    Type: String
+    Description: ARN of the AppSpec source bucket
+
 Resources:
-  ArtifactBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      VersioningConfiguration:
-        Status: Enabled
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-
-  AppSpecSourceBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub '${AWS::AccountId}-${AWS::Region}-${PipelineName}-source'
-      VersioningConfiguration:
-        Status: Enabled
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-
   CodePipelineRole:
     Type: AWS::IAM::Role
     Properties:
@@ -70,10 +64,10 @@ Resources:
                   - s3:GetBucketVersioning
                   - s3:PutObject
                 Resource:
-                  - !GetAtt ArtifactBucket.Arn
-                  - !Sub '${ArtifactBucket.Arn}/*'
-                  - !GetAtt AppSpecSourceBucket.Arn
-                  - !Sub '${AppSpecSourceBucket.Arn}/*'
+                  - !Ref ArtifactBucketArn
+                  - !Sub '${ArtifactBucketArn}/*'
+                  - !Ref AppSpecSourceBucketArn
+                  - !Sub '${AppSpecSourceBucketArn}/*'
               - Effect: Allow
                 Action:
                   - ecr:DescribeImages
@@ -160,9 +154,6 @@ Resources:
           - ProdTrafficRoute:
               ListenerArns:
                 - !Ref ALBListenerArn
-            TestTrafficRoute:
-              ListenerArns:
-                - !Ref TestListenerArn
             TargetGroups:
               - Name: !Ref BlueTargetGroupName
               - Name: !Ref GreenTargetGroupName
@@ -179,7 +170,7 @@ Resources:
       ExecutionMode: QUEUED
       ArtifactStore:
         Type: S3
-        Location: !Ref ArtifactBucket
+        Location: !Ref ArtifactBucketName
       Stages:
         - Name: Source
           Actions:
@@ -202,7 +193,7 @@ Resources:
                 Provider: S3
                 Version: 1
               Configuration:
-                S3Bucket: !Ref AppSpecSourceBucket
+                S3Bucket: !Ref AppSpecSourceBucketName
                 S3ObjectKey: deploy.zip
                 PollForSourceChanges: false
               OutputArtifacts:
@@ -254,10 +245,6 @@ Resources:
           RoleArn: !GetAtt EventBridgeRole.Arn
 
 Outputs:
-  AppSpecSourceBucketName:
-    Value: !Ref AppSpecSourceBucket
-    Description: Upload deploy.zip containing appspec.yaml and taskdef.json here before first run
-
   PipelineName:
     Value: !Ref Pipeline
     Description: CodePipeline name

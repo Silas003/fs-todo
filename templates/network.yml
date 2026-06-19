@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Multi-AZ VPC with public/private subnets for ALB, ECS, RDS, and ElastiCache
+Description: VPC, subnets, internet gateway, and route tables
 
 Parameters:
   VpcCidr:
@@ -60,7 +60,6 @@ Resources:
         - Key: Project
           Value: todo
 
-
   PublicSubnet1:
     Type: AWS::EC2::Subnet
     DependsOn: InternetGatewayAttachment
@@ -83,8 +82,6 @@ Resources:
         - Key: Name
           Value: todo-public-2
 
-  # ── Private subnets – ECS ──────────────────────────────────────────────────
-
   PrivateECSSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -104,8 +101,6 @@ Resources:
       Tags:
         - Key: Name
           Value: todo-ecs-private-2
-
-  # ── Private subnets – RDS ──────────────────────────────────────────────────
 
   PrivateRDSSubnet1:
     Type: AWS::EC2::Subnet
@@ -127,8 +122,6 @@ Resources:
         - Key: Name
           Value: todo-rds-private-2
 
-  # ── Private subnets – ElastiCache ─────────────────────────────────────────
-
   PrivateCacheSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -149,8 +142,6 @@ Resources:
         - Key: Name
           Value: todo-cache-private-2
 
-  # ── Internet Gateway ───────────────────────────────────────────────────────
-
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
@@ -163,8 +154,6 @@ Resources:
     Properties:
       VpcId: !Ref CustomVPC
       InternetGatewayId: !Ref InternetGateway
-
-  # ── Route tables ───────────────────────────────────────────────────────────
 
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
@@ -194,7 +183,6 @@ Resources:
       RouteTableId: !Ref PublicRouteTable
       SubnetId: !Ref PublicSubnet2
 
-  # ECS private route table: all AWS traffic via VPC endpoints, no internet egress
   PrivateECSRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -215,7 +203,6 @@ Resources:
       RouteTableId: !Ref PrivateECSRouteTable
       SubnetId: !Ref PrivateECSSubnet2
 
-  # RDS private route table: VPC-local only
   PrivateRDSRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -236,7 +223,6 @@ Resources:
       RouteTableId: !Ref PrivateRDSRouteTable
       SubnetId: !Ref PrivateRDSSubnet2
 
-  # Cache private route table: VPC-local only
   PrivateCacheRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -256,203 +242,6 @@ Resources:
     Properties:
       RouteTableId: !Ref PrivateCacheRouteTable
       SubnetId: !Ref PrivateCacheSubnet2
-
-  # ── Security Groups ────────────────────────────────────────────────────────
-
-  ALBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Public ALB - accepts HTTP traffic from internet
-      GroupName: todo-alb-sg
-      VpcId: !Ref CustomVPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-          Description: Production HTTP
-        - IpProtocol: tcp
-          FromPort: 8081
-          ToPort: 8081
-          CidrIp: 0.0.0.0/0
-          Description: CodeDeploy test listener
-      Tags:
-        - Key: Name
-          Value: todo-alb-sg
-
-  ECSSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: ECS Fargate tasks - inbound from ALB only
-      GroupName: todo-ecs-sg
-      VpcId: !Ref CustomVPC
-      Tags:
-        - Key: Name
-          Value: todo-ecs-sg
-
-  ECSIngressFromALB:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref ECSSecurityGroup
-      IpProtocol: tcp
-      FromPort: 8080
-      ToPort: 8080
-      SourceSecurityGroupId: !Ref ALBSecurityGroup
-      Description: App traffic from ALB
-
-  RDSProxySecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: RDS Proxy - accepts PostgreSQL from ECS tasks
-      GroupName: todo-rds-proxy-sg
-      VpcId: !Ref CustomVPC
-      Tags:
-        - Key: Name
-          Value: todo-rds-proxy-sg
-
-  RDSProxyIngressFromECS:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref RDSProxySecurityGroup
-      IpProtocol: tcp
-      FromPort: 5432
-      ToPort: 5432
-      SourceSecurityGroupId: !Ref ECSSecurityGroup
-      Description: PostgreSQL from ECS tasks
-
-  RDSSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: RDS instance - accepts PostgreSQL from RDS Proxy only
-      GroupName: todo-rds-sg
-      VpcId: !Ref CustomVPC
-      Tags:
-        - Key: Name
-          Value: todo-rds-sg
-
-  RDSIngressFromProxy:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref RDSSecurityGroup
-      IpProtocol: tcp
-      FromPort: 5432
-      ToPort: 5432
-      SourceSecurityGroupId: !Ref RDSProxySecurityGroup
-      Description: PostgreSQL from RDS Proxy
-
-  ElastiCacheSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: ElastiCache Redis - accepts connections from ECS tasks
-      GroupName: todo-cache-sg
-      VpcId: !Ref CustomVPC
-      Tags:
-        - Key: Name
-          Value: todo-cache-sg
-
-  CacheIngressFromECS:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref ElastiCacheSecurityGroup
-      IpProtocol: tcp
-      FromPort: 6379
-      ToPort: 6379
-      SourceSecurityGroupId: !Ref ECSSecurityGroup
-      Description: Redis from ECS tasks
-
-  VpcEndpointSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Interface VPC endpoints - HTTPS from VPC
-      GroupName: todo-vpce-sg
-      VpcId: !Ref CustomVPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: !Ref VpcCidr
-          Description: HTTPS from VPC
-      Tags:
-        - Key: Name
-          Value: todo-vpce-sg
-
-  # ── VPC Endpoints ──────────────────────────────────────────────────────────
-
-  S3GatewayEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      VpcEndpointType: Gateway
-      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
-      VpcId: !Ref CustomVPC
-      RouteTableIds:
-        - !Ref PrivateECSRouteTable
-        - !Ref PrivateRDSRouteTable
-        - !Ref PrivateCacheRouteTable
-
-  ECRApiEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      VpcEndpointType: Interface
-      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.api'
-      VpcId: !Ref CustomVPC
-      SubnetIds:
-        - !Ref PrivateECSSubnet1
-        - !Ref PrivateECSSubnet2
-      SecurityGroupIds:
-        - !Ref VpcEndpointSecurityGroup
-      PrivateDnsEnabled: true
-
-  ECRDkrEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      VpcEndpointType: Interface
-      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.dkr'
-      VpcId: !Ref CustomVPC
-      SubnetIds:
-        - !Ref PrivateECSSubnet1
-        - !Ref PrivateECSSubnet2
-      SecurityGroupIds:
-        - !Ref VpcEndpointSecurityGroup
-      PrivateDnsEnabled: true
-
-  CloudWatchLogsEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      VpcEndpointType: Interface
-      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.logs'
-      VpcId: !Ref CustomVPC
-      SubnetIds:
-        - !Ref PrivateECSSubnet1
-        - !Ref PrivateECSSubnet2
-      SecurityGroupIds:
-        - !Ref VpcEndpointSecurityGroup
-      PrivateDnsEnabled: true
-
-  SecretsManagerEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      VpcEndpointType: Interface
-      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.secretsmanager'
-      VpcId: !Ref CustomVPC
-      SubnetIds:
-        - !Ref PrivateECSSubnet1
-        - !Ref PrivateECSSubnet2
-      SecurityGroupIds:
-        - !Ref VpcEndpointSecurityGroup
-      PrivateDnsEnabled: true
-
-  SSMEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      VpcEndpointType: Interface
-      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssm'
-      VpcId: !Ref CustomVPC
-      SubnetIds:
-        - !Ref PrivateECSSubnet1
-        - !Ref PrivateECSSubnet2
-      SecurityGroupIds:
-        - !Ref VpcEndpointSecurityGroup
-      PrivateDnsEnabled: true
 
 Outputs:
   VPCId:
@@ -495,22 +284,14 @@ Outputs:
     Value: !Ref PrivateCacheSubnet2
     Description: Cache Private Subnet 2 (AZ-b)
 
-  ALBSecurityGroupId:
-    Value: !Ref ALBSecurityGroup
-    Description: ALB Security Group ID
+  PrivateECSRouteTableId:
+    Value: !Ref PrivateECSRouteTable
+    Description: ECS private route table ID
 
-  ECSSecurityGroupId:
-    Value: !Ref ECSSecurityGroup
-    Description: ECS Tasks Security Group ID
+  PrivateRDSRouteTableId:
+    Value: !Ref PrivateRDSRouteTable
+    Description: RDS private route table ID
 
-  RDSProxySecurityGroupId:
-    Value: !Ref RDSProxySecurityGroup
-    Description: RDS Proxy Security Group ID
-
-  RDSSecurityGroupId:
-    Value: !Ref RDSSecurityGroup
-    Description: RDS Instance Security Group ID
-
-  ElastiCacheSecurityGroupId:
-    Value: !Ref ElastiCacheSecurityGroup
-    Description: ElastiCache Security Group ID
+  PrivateCacheRouteTableId:
+    Value: !Ref PrivateCacheRouteTable
+    Description: Cache private route table ID
