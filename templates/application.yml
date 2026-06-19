@@ -26,10 +26,6 @@ Parameters:
     Type: Number
     Default: 80
 
-  TestListenerPort:
-    Type: Number
-    Default: 8081
-
   TargetGroupName:
     Type: String
     Default: todo-target-group
@@ -67,17 +63,6 @@ Resources:
           TargetGroupArn: !Ref ALBTargetGroup
       LoadBalancerArn: !Ref ApplicationLoadBalancer
       Port: !Ref ListenerPort
-      Protocol: HTTP
-
-  TestListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    DependsOn: ALBListener
-    Properties:
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref GreenTargetGroup
-      LoadBalancerArn: !Ref ApplicationLoadBalancer
-      Port: !Ref TestListenerPort
       Protocol: HTTP
 
   ALBTargetGroup:
@@ -128,10 +113,6 @@ Outputs:
   ALBListenerArn:
     Value: !Ref ALBListener
     Description: Production listener ARN
-
-  TestListenerArn:
-    Value: !Ref TestListener
-    Description: Test listener ARN for CodeDeploy green validation
 
   BlueTargetGroupName:
     Value: !GetAtt ALBTargetGroup.TargetGroupName
