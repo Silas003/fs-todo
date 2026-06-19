@@ -1,0 +1,203 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ECS Fargate cluster, task definition, and service
+
+Parameters:
+  Image:
+    Type: String
+    Default: 266735814394.dkr.ecr.eu-central-1.amazonaws.com/todo:latest
+
+  TaskCPU:
+    Type: Number
+    Default: 256
+    AllowedValues:
+      - 256
+      - 512
+      - 1024
+
+  TaskMemory:
+    Type: Number
+    Default: 512
+    AllowedValues:
+      - 512
+      - 1024
+      - 2048
+
+  ECSPrivateSubnet1:
+    Type: String
+
+  ECSPrivateSubnet2:
+    Type: String
+
+  ECSSecurityGroupId:
+    Type: String
+
+  TargetGroupArn:
+    Type: String
+
+  TaskExecutionRoleArn:
+    Type: String
+
+  TaskRoleArn:
+    Type: String
+
+  ContainerName:
+    Type: String
+    Default: todo
+
+  ContainerPort:
+    Type: Number
+    Default: 8080
+
+  LogGroupName:
+    Type: String
+    Default: /ecs/todo
+
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+
+  ClusterName:
+    Type: String
+    Default: TodoCluster
+
+  ServiceName:
+    Type: String
+    Default: todo-service
+
+  DesiredCount:
+    Type: Number
+    Default: 1
+
+  DBName:
+    Type: String
+    Default: todo
+
+  DBSecretArn:
+    Type: String
+
+  DBProxyEndpoint:
+    Type: String
+
+  RedisHost:
+    Type: String
+
+  RedisPort:
+    Type: Number
+    Default: 6379
+
+Resources:
+  TodoLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref LogGroupName
+      RetentionInDays: !Ref LogRetentionDays
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref ServiceName
+      Cpu: !Ref TaskCPU
+      Memory: !Ref TaskMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !Ref TaskExecutionRoleArn
+      TaskRoleArn: !Ref TaskRoleArn
+      Tags:
+        - Key: Name
+          Value: !Ref ServiceName
+        - Key: Project
+          Value: todo
+      ContainerDefinitions:
+        - Name: !Ref ContainerName
+          Image: !Ref Image
+          Essential: true
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              HostPort: !Ref ContainerPort
+              Protocol: tcp
+          Environment:
+            - Name: DB_PORT
+              Value: '5432'
+            - Name: DB_NAME
+              Value: !Ref DBName
+            - Name: DB_HOST
+              Value: !Ref DBProxyEndpoint
+            - Name: REDIS_HOST
+              Value: !Ref RedisHost
+            - Name: REDIS_PORT
+              Value: !Sub '${RedisPort}'
+          Secrets:
+            - Name: DB_USERNAME
+              ValueFrom: !Sub '${DBSecretArn}:username::'
+            - Name: DB_PASSWORD
+              ValueFrom: !Sub '${DBSecretArn}:password::'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref TodoLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Ref ContainerName
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - 'wget -q -O /dev/null http://localhost:8080/health || exit 1'
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref ClusterName
+      CapacityProviders:
+        - FARGATE
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+      Configuration:
+        ExecuteCommandConfiguration:
+          Logging: DEFAULT
+      Tags:
+        - Key: Project
+          Value: todo
+
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Ref ServiceName
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCount
+      DeploymentController:
+        Type: CODE_DEPLOY
+      LaunchType: FARGATE
+      HealthCheckGracePeriodSeconds: 60
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref ECSSecurityGroupId
+          Subnets:
+            - !Ref ECSPrivateSubnet1
+            - !Ref ECSPrivateSubnet2
+      TaskDefinition: !Ref TaskDefinition
+      LoadBalancers:
+        - ContainerName: !Ref ContainerName
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: !Ref TargetGroupArn
+      Tags:
+        - Key: Project
+          Value: todo
+
+Outputs:
+  ECSClusterName:
+    Value: !Ref ECSCluster
+    Description: ECS Cluster name
+
+  ECSServiceName:
+    Value: !Ref ServiceName
+    Description: ECS Service name

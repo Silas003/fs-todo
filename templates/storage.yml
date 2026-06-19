@@ -1,0 +1,46 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: S3 buckets for CodePipeline artifacts and CodeDeploy AppSpec source
+
+Parameters:
+  PipelineName:
+    Type: String
+    Default: todo-pipeline
+
+Resources:
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  AppSpecSourceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${AWS::AccountId}-${AWS::Region}-${PipelineName}-source'
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+Outputs:
+  ArtifactBucketName:
+    Value: !Ref ArtifactBucket
+    Description: CodePipeline artifact bucket name
+
+  ArtifactBucketArn:
+    Value: !GetAtt ArtifactBucket.Arn
+    Description: CodePipeline artifact bucket ARN
+
+  AppSpecSourceBucketName:
+    Value: !Ref AppSpecSourceBucket
+    Description: Upload deploy.zip here before first pipeline run
+
+  AppSpecSourceBucketArn:
+    Value: !GetAtt AppSpecSourceBucket.Arn
+    Description: AppSpec source bucket ARN

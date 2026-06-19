@@ -1,0 +1,53 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Application Auto Scaling target and CPU tracking policy for the ECS service
+
+Parameters:
+  ECSClusterName:
+    Type: String
+
+  ECSServiceName:
+    Type: String
+
+  AutoScalingMinCapacity:
+    Type: Number
+    Default: 1
+
+  AutoScalingMaxCapacity:
+    Type: Number
+    Default: 4
+
+  CPUScalingTarget:
+    Type: Number
+    Default: 60
+
+  ScaleInCooldown:
+    Type: Number
+    Default: 100
+
+  ScaleOutCooldown:
+    Type: Number
+    Default: 70
+
+Resources:
+  ECSServiceAutoScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: !Ref AutoScalingMaxCapacity
+      MinCapacity: !Ref AutoScalingMinCapacity
+      ResourceId: !Sub 'service/${ECSClusterName}/${ECSServiceName}'
+      RoleARN: !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService'
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  ECSServiceScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: todo-cpu-scaling-policy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ECSServiceAutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: !Ref CPUScalingTarget
+        ScaleInCooldown: !Ref ScaleInCooldown
+        ScaleOutCooldown: !Ref ScaleOutCooldown

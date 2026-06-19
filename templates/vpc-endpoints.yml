@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: VPC interface and gateway endpoints for private AWS service access
+
+Parameters:
+  VpcId:
+    Type: String
+
+  PrivateECSSubnet1Id:
+    Type: String
+
+  PrivateECSSubnet2Id:
+    Type: String
+
+  VpcEndpointSecurityGroupId:
+    Type: String
+
+  PrivateECSRouteTableId:
+    Type: String
+
+  PrivateRDSRouteTableId:
+    Type: String
+
+  PrivateCacheRouteTableId:
+    Type: String
+
+Resources:
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Gateway
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId: !Ref VpcId
+      RouteTableIds:
+        - !Ref PrivateECSRouteTableId
+        - !Ref PrivateRDSRouteTableId
+        - !Ref PrivateCacheRouteTableId
+
+  ECRApiEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.api'
+      VpcId: !Ref VpcId
+      SubnetIds:
+        - !Ref PrivateECSSubnet1Id
+        - !Ref PrivateECSSubnet2Id
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroupId
+      PrivateDnsEnabled: true
+
+  ECRDkrEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.dkr'
+      VpcId: !Ref VpcId
+      SubnetIds:
+        - !Ref PrivateECSSubnet1Id
+        - !Ref PrivateECSSubnet2Id
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroupId
+      PrivateDnsEnabled: true
+
+  CloudWatchLogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.logs'
+      VpcId: !Ref VpcId
+      SubnetIds:
+        - !Ref PrivateECSSubnet1Id
+        - !Ref PrivateECSSubnet2Id
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroupId
+      PrivateDnsEnabled: true
+
+  SecretsManagerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.secretsmanager'
+      VpcId: !Ref VpcId
+      SubnetIds:
+        - !Ref PrivateECSSubnet1Id
+        - !Ref PrivateECSSubnet2Id
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroupId
+      PrivateDnsEnabled: true
+
+  SSMEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssm'
+      VpcId: !Ref VpcId
+      SubnetIds:
+        - !Ref PrivateECSSubnet1Id
+        - !Ref PrivateECSSubnet2Id
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroupId
+      PrivateDnsEnabled: true

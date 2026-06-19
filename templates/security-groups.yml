@@ -1,0 +1,147 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Security groups for ALB, ECS, RDS Proxy, RDS, ElastiCache, and VPC endpoints
+
+Parameters:
+  VpcId:
+    Type: String
+
+  VpcCidr:
+    Type: String
+
+Resources:
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Public ALB - accepts HTTP traffic from internet
+      GroupName: todo-alb-sg
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Production HTTP
+      Tags:
+        - Key: Name
+          Value: todo-alb-sg
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS Fargate tasks - inbound from ALB only
+      GroupName: todo-ecs-sg
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: todo-ecs-sg
+
+  ECSIngressFromALB:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ECSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      SourceSecurityGroupId: !Ref ALBSecurityGroup
+      Description: App traffic from ALB
+
+  RDSProxySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS Proxy - accepts PostgreSQL from ECS tasks
+      GroupName: todo-rds-proxy-sg
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: todo-rds-proxy-sg
+
+  RDSProxyIngressFromECS:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RDSProxySecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref ECSSecurityGroup
+      Description: PostgreSQL from ECS tasks
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS instance - accepts PostgreSQL from RDS Proxy only
+      GroupName: todo-rds-sg
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: todo-rds-sg
+
+  RDSIngressFromProxy:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RDSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref RDSProxySecurityGroup
+      Description: PostgreSQL from RDS Proxy
+
+  ElastiCacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ElastiCache Redis - accepts connections from ECS tasks
+      GroupName: todo-cache-sg
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: todo-cache-sg
+
+  CacheIngressFromECS:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ElastiCacheSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      SourceSecurityGroupId: !Ref ECSSecurityGroup
+      Description: Redis from ECS tasks
+
+  VpcEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Interface VPC endpoints - HTTPS from VPC
+      GroupName: todo-vpce-sg
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidr
+          Description: HTTPS from VPC
+      Tags:
+        - Key: Name
+          Value: todo-vpce-sg
+
+Outputs:
+  ALBSecurityGroupId:
+    Value: !Ref ALBSecurityGroup
+    Description: ALB Security Group ID
+
+  ECSSecurityGroupId:
+    Value: !Ref ECSSecurityGroup
+    Description: ECS Tasks Security Group ID
+
+  RDSProxySecurityGroupId:
+    Value: !Ref RDSProxySecurityGroup
+    Description: RDS Proxy Security Group ID
+
+  RDSSecurityGroupId:
+    Value: !Ref RDSSecurityGroup
+    Description: RDS Instance Security Group ID
+
+  ElastiCacheSecurityGroupId:
+    Value: !Ref ElastiCacheSecurityGroup
+    Description: ElastiCache Security Group ID
+
+  VpcEndpointSecurityGroupId:
+    Value: !Ref VpcEndpointSecurityGroup
+    Description: VPC Endpoint Security Group ID
