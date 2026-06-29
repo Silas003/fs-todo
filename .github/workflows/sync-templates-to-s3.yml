@@ -126,6 +126,7 @@ jobs:
             --stack-name todo \
             --capabilities CAPABILITY_NAMED_IAM \
             --parameter-overrides \
+              TemplatesBucketUrl=https://${{ secrets.TEMPLATES_BUCKET }}.s3.${{ secrets.AWS_REGION }}.amazonaws.com \
               ECRRepositoryName=${{ secrets.ECR_REPOSITORY_NAME }} \
               ECRRepositoryUri=${{ secrets.ECR_REPOSITORY_URI }} \
             --no-fail-on-empty-changeset
